@@ -248,6 +248,8 @@ public class BoydguyService extends BaseService {
 //        System.out.println(productBaseDao.select(product));
 
         System.out.println(productBaseDao.selectByPrimaryKey(25));
+        System.out.println(productBaseDao.selectByPrimaryKey(101));
+        System.out.println(productBaseDao.selectByPrimaryKey(102));
 
 //        System.out.println(productBaseDao.selectByIds("78,79,80,81,82,83,84,85"));
 

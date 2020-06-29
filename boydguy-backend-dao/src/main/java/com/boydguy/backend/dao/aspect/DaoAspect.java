@@ -46,6 +46,7 @@ public class DaoAspect extends KeyExpirationEventMessageListener {
 
     private static final ConcurrentHashMap<String, MethodDescription> APP_CACHE_KEY_MAP = new ConcurrentHashMap<>();
     private static final String APP_CACHE_KEY = "daoCacheKeyMap";
+    private static final String NULL_CACHE_KEY = "nullCacheKeyMap";
     private static final String EHCACHE_APP_NAME = "daoAspectCache";
     private ObjectMapper objectMapper;
 
@@ -133,8 +134,11 @@ public class DaoAspect extends KeyExpirationEventMessageListener {
             String redisValue = RedisUtils.getValue(cacheKey);
             if (redisValue != null) {
                 //TODO：二级缓存Redis中有数据不再执行DB查询
-                ehcache.put(new Element(cacheKey, redisValue));//如果二级缓存Redis中有数据需要再次保存到一级缓存ehcache中
                 log.info("返回了二级缓存Redis的数据 cache key：{}", cacheKey);
+                if ("${null}".equals(redisValue)) {
+                    return null;//防止Redis穿透
+                }
+                ehcache.put(new Element(cacheKey, redisValue));//如果二级缓存Redis中有数据需要再次保存到一级缓存ehcache中
 
                 // 通过Jackson的TypeFactory动态构建反序列化的类型（类似于TypeReference<T>）
                 return stringValueCastToTargetType(redisValue, exactReturnType);
@@ -142,10 +146,10 @@ public class DaoAspect extends KeyExpirationEventMessageListener {
 
             //TODO：执行被代理的方法
             result = joinPoint.proceed(args);
+            String resultJsonValue = result == null ? null : JsonUtils.to(result);
 
             //TODO：后置通知...
             if (result != null) {
-                String resultJsonValue = JsonUtils.to(result);
                 //TODO：返回通知...
                 RedisUtils.putValue(cacheKey, resultJsonValue);//存放二级缓存
                 RedisUtils.setExpire(redisExpireTime, cacheKey);
@@ -155,8 +159,17 @@ public class DaoAspect extends KeyExpirationEventMessageListener {
 
                 RedisUtils.putHash(APP_CACHE_KEY, cacheKey, methodDesc);//保存cacheKey在redis中
                 APP_CACHE_KEY_MAP.put(cacheKey, methodDesc);//保存cacheKey在JVM内存中
-                log.info("已同步缓存Key {}", cacheKey);
+            } else {
+                RedisUtils.putValue(cacheKey, "${null}");//存放二级缓存，防止Redis穿透，避免重复访问数据库
+                RedisUtils.setExpire(60, cacheKey);
+
+                log.info("缓存数据：{} - {}", cacheKey, "${null}");
+
+                RedisUtils.putHash(NULL_CACHE_KEY, cacheKey, methodDesc);//保存cacheKey在redis中
+                APP_CACHE_KEY_MAP.put(cacheKey, methodDesc);//保存cacheKey在JVM内存中
             }
+            log.info("已同步cache Key {} ，总数：{}", cacheKey, APP_CACHE_KEY_MAP.size());
+            log.info("{}.{} 返回值：{}", packagePathName, methodName, resultJsonValue);
         } catch (Throwable throwable) {
             //TODO：异常通知...
             log.error("执行 {}.{} 时发生异常：{}", packagePathName, methodName, ComUtils.printException(throwable));
@@ -208,7 +221,7 @@ public class DaoAspect extends KeyExpirationEventMessageListener {
 
                 RedisUtils.removeHashEntry(APP_CACHE_KEY, key);
                 APP_CACHE_KEY_MAP.remove(key);
-                log.info("缓存cache key：{}已被删除并同步到本地", key);
+                log.info("缓存cache key：{}已被删除并同步到本地，剩余：{}", key, APP_CACHE_KEY_MAP.size());
             }
 
             // ④根据通配符规则清除缓存
@@ -220,7 +233,7 @@ public class DaoAspect extends KeyExpirationEventMessageListener {
 
             if (result != null) {
                 //TODO：返回通知...
-                log.info("{} 返回值：{}", methodName, JsonUtils.to(result));
+                log.info("{}.{} 返回值：{}", packagePathName, methodName, JsonUtils.to(result));
             }
         } catch (Throwable throwable) {
             //TODO：异常通知...
@@ -238,6 +251,10 @@ public class DaoAspect extends KeyExpirationEventMessageListener {
             return;
         }
         Map<Object, Object> cacheKeyMap = stringRedisTemplate.opsForHash().entries(APP_CACHE_KEY);
+        Map<Object, Object> nullCacheKeyMap = stringRedisTemplate.opsForHash().entries(NULL_CACHE_KEY);
+        if (nullCacheKeyMap.size() > 0) {
+            cacheKeyMap.putAll(nullCacheKeyMap);
+        }
         if (cacheKeyMap.size() > 0) {
             for (Map.Entry<Object, Object> entry : cacheKeyMap.entrySet()) {
                 Boolean keyExists = stringRedisTemplate.hasKey(String.valueOf(entry.getKey()));
@@ -248,9 +265,11 @@ public class DaoAspect extends KeyExpirationEventMessageListener {
                 }
                 // 工程启动时，Ehcache缓存中是空的，此处只需要判断工程未启动时，过期的Redis缓存，从daoCacheKeyMap中移除
                 stringRedisTemplate.opsForHash().delete(APP_CACHE_KEY, RedisUtils.str(entry.getKey()));
+                stringRedisTemplate.opsForHash().delete(NULL_CACHE_KEY, RedisUtils.str(entry.getKey()));
                 log.info("Redis中cache key={} 的缓存已过期", entry.getKey());
             }
         }
+        log.info("当前缓存中的cache key总数是：{}", APP_CACHE_KEY_MAP.size());
     }
 
     private Object stringValueCastToTargetType(String value, Type exactReturnType) throws IOException {
@@ -391,10 +410,11 @@ public class DaoAspect extends KeyExpirationEventMessageListener {
         // Ehcache作为一级缓存，在本地内存中将它删除
         EhcacheDynamicUtils.removeOneCacheElement(EHCACHE_APP_NAME, expiredKey);
         RedisUtils.removeHashEntry(APP_CACHE_KEY, expiredKey);
+        RedisUtils.removeHashEntry(NULL_CACHE_KEY, expiredKey);
 
         // 应用程序中对应的Key从缓存中删除
         APP_CACHE_KEY_MAP.remove(expiredKey);
-        log.info("已过期的缓存Key {} 成功同步到本地", expiredKey);
+        log.info("删除已过期的cache key：{} ，剩余：{} ", expiredKey, APP_CACHE_KEY_MAP.size());
     }
 
 }
