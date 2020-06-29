@@ -125,11 +125,6 @@ public class DaoAspect extends KeyExpirationEventMessageListener {
                 //TODO：一级缓存Ehcache中有数据不再执行二级缓存Redis查询
                 log.info("返回了一级缓存Ehcache的数据 cache key：{}", cacheKey);
 
-                //TODO：防止Redis穿透
-                if ("${null}".equals(String.valueOf(ehcacheValue))) {
-                    return null;
-                }
-
                 // 通过Jackson的TypeFactory动态构建反序列化的类型（类似于TypeReference<T>）
                 return stringValueCastToTargetType(String.valueOf(ehcacheValue), exactReturnType);
             }
@@ -137,11 +132,6 @@ public class DaoAspect extends KeyExpirationEventMessageListener {
             //TODO：获取二级缓存Redis
             String redisValue = RedisUtils.getValue(cacheKey);
             if (redisValue != null) {
-                //TODO：防止Redis穿透
-                if ("${null}".equals(redisValue)) {
-                    return null;
-                }
-
                 //TODO：二级缓存Redis中有数据不再执行DB查询
                 ehcache.put(new Element(cacheKey, redisValue));//如果二级缓存Redis中有数据需要再次保存到一级缓存ehcache中
                 log.info("返回了二级缓存Redis的数据 cache key：{}", cacheKey);
@@ -164,16 +154,8 @@ public class DaoAspect extends KeyExpirationEventMessageListener {
                 log.info("缓存数据：{} - {}", cacheKey, resultJsonValue);
 
                 RedisUtils.putHash(APP_CACHE_KEY, cacheKey, methodDesc);//保存cacheKey在redis中
-                APP_CACHE_KEY_MAP.put(cacheKey, methodDesc);//保存cacheKey在内存中
+                APP_CACHE_KEY_MAP.put(cacheKey, methodDesc);//保存cacheKey在JVM内存中
                 log.info("已同步缓存Key {}", cacheKey);
-            } else {
-                //TODO：防止Redis穿透
-                RedisUtils.putValue(cacheKey, "${null}");//存放二级缓存
-                RedisUtils.setExpire(redisExpireTime, cacheKey);
-                ehcache.put(new Element(cacheKey, "${null}"));//存放一级缓存
-
-                RedisUtils.putHash(APP_CACHE_KEY, cacheKey, methodDesc);//同步cacheKey在redis中
-                APP_CACHE_KEY_MAP.put(cacheKey, methodDesc);//保存cacheKey在内存中
             }
         } catch (Throwable throwable) {
             //TODO：异常通知...
