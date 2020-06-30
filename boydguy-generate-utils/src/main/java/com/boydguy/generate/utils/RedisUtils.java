@@ -6,12 +6,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.core.*;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
+import org.springframework.util.Assert;
+import org.springframework.util.DigestUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -20,8 +25,16 @@ import java.util.stream.Collectors;
 public class RedisUtils {
 
     private static RedisTemplate<Object, Object> redisTemplate;
+    /**
+     * 使用RedisTemplate存放的对象(Object)在Redis中为非文本形式的二进制数据，读取到的仍为Object对象。
+     * 通常习惯将对象序列化为json存放到redis中，所以StringRedisTemplate更常用。
+     */
     private static StringRedisTemplate stringRedisTemplate;
     private static ObjectMapper jacksonMapper;
+    /**
+     * 通过setnx命令在redis中存放的全局唯一的锁名称
+     */
+    private static final String REDIS_LOCK = "GLOBAL_LOCK";
 
     @Autowired
     public RedisUtils(RedisTemplate<Object, Object> redisTemplate,
@@ -32,14 +45,6 @@ public class RedisUtils {
         jacksonMapper = objectMapper.copy();
         jacksonMapper.setSerializationInclusion(JsonInclude.Include.ALWAYS);
         jacksonMapper.setDefaultPropertyInclusion(JsonInclude.Include.ALWAYS);
-    }
-
-    /**
-     * 使用RedisTemplate存放的对象(Object)在Redis中为非文本形式的二进制数据，读取到的仍为Object对象。
-     * 通常习惯将对象序列化为json存放到redis中，所以StringRedisTemplate更常用。
-     */
-    public static RedisTemplate<Object, Object> getRedisTemplate() {
-        return RedisUtils.redisTemplate;
     }
 
     /**
@@ -87,6 +92,81 @@ public class RedisUtils {
                     consumer.accept(redisOperations);
                     return redisOperations.exec();
                 }
+            });
+        } catch (Exception ex) {
+            log.error(ComUtils.printException(ex));
+        }
+    }
+
+    /**
+     * Redis实现分布式锁核心方法：获取锁
+     *
+     * @param acquireTimeout 在获取锁之前的超时时间--在尝试获取锁的时候，如果在规定的时间内还没有获取到锁，直接放弃（请求超时）；单位：毫秒
+     * @param expireTimeout  在获取锁之后的超时时间--当获取锁成功之后，有对应key的有效期，对应的key在规定时间内进行失效；单位：毫秒
+     */
+    public static String gainRedisLock(long acquireTimeout, long expireTimeout) {
+        try {
+            AtomicInteger counter = new AtomicInteger(0);
+
+            final String uniqueValue = DigestUtils.md5DigestAsHex(
+                    String.format("%s_%s_%s", UUID.randomUUID().toString(), String.valueOf(System.currentTimeMillis()), String.valueOf(Math.random()))
+                            .getBytes(StandardCharsets.UTF_8));
+            byte[] lockKey = REDIS_LOCK.getBytes(StandardCharsets.UTF_8);
+            byte[] lockValue = uniqueValue.getBytes(StandardCharsets.UTF_8);
+
+            // 使用循环机制，保证重复进行尝试获取锁（乐观锁）
+            long endTime = System.currentTimeMillis() + acquireTimeout;
+            while (System.currentTimeMillis() < endTime) {
+                // 获取锁：使用setnx命令插入REDIS_LOCK，返回1表示成功获取锁。
+                Object value = redisTemplate.execute((RedisConnection redisConnection) -> {
+                    counter.incrementAndGet();
+                    Boolean isSuccess = redisConnection.stringCommands().setNX(lockKey, lockValue);
+                    if (isSuccess != null && isSuccess) {
+                        redisConnection.expire(lockKey, expireTimeout / 1000);//超时时间，单位：秒
+                        log.info("线程{} 拿到分布式锁 尝试次数：{}", Thread.currentThread().getName(), counter.get());
+                    }
+
+                    if (redisConnection.isClosed()) {
+                        redisConnection.close();
+                    }
+                    return isSuccess != null && isSuccess ? uniqueValue : null;
+                });
+
+                if (value != null) {
+                    return String.valueOf(value);
+                }
+            }
+            log.error("线程{} 获取分布式锁超时 尝试次数：{}", Thread.currentThread().getName(), counter.get());
+        } catch (Exception ex) {
+            log.error(ComUtils.printException(ex));
+        }
+        return null;
+    }
+
+    /**
+     * Redis实现分布式锁核心方法：释放锁
+     * 1、key在redis中超时失效
+     * 2、业务执行完毕，删除key
+     */
+    public static void releaseRedisLock(String redisLockValue) {
+        Assert.notNull(redisLockValue, "分布式锁的ID为空");
+        try {
+            redisTemplate.execute((RedisConnection redisConnection) -> {
+                byte[] lockKey = REDIS_LOCK.getBytes(StandardCharsets.UTF_8);
+                byte[] lockValue = redisConnection.stringCommands().get(lockKey);
+
+                String strLockValue = lockValue == null ? "" : new String(lockValue, StandardCharsets.UTF_8);
+                if (redisLockValue.equals(strLockValue)) {
+                    redisConnection.del(lockKey);
+                    log.info("线程{} 释放分布式锁", Thread.currentThread().getName());
+                } else {
+                    log.error("线程{} 被释放的分布式锁 {} 不存在", Thread.currentThread().getName(), redisLockValue);
+                }
+
+                if (redisConnection.isClosed()) {
+                    redisConnection.close();
+                }
+                return true;
             });
         } catch (Exception ex) {
             log.error(ComUtils.printException(ex));

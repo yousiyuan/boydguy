@@ -280,4 +280,19 @@ public class BoydguyService extends BaseService {
         return ComUtils.str(result);
     }
 
+    /**
+     * 测试Redis实现分布式锁
+     */
+    void testRedisLock(int timeout) throws Exception {
+        // 获取锁
+        String redisLockValue = RedisUtils.gainRedisLock(timeout, 50001);
+        if (redisLockValue == null) {
+            return;
+        }
+        System.out.println(redisLockValue + " --- 开始执行正常的业务逻辑 --- " + redisLockValue);
+        Thread.sleep(1);//用时1毫秒处理完了业务逻辑
+        //释放锁
+        RedisUtils.releaseRedisLock(redisLockValue);
+    }
+
 }

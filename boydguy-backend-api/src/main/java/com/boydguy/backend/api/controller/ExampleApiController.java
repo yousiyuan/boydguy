@@ -2,6 +2,7 @@ package com.boydguy.backend.api.controller;
 
 import com.boydguy.backend.pojo.Product;
 import com.boydguy.backend.service.BoydguyService;
+import com.boydguy.backend.service.ThreadTest;
 import com.boydguy.generate.utils.JsonUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -97,6 +98,15 @@ public class ExampleApiController {
     @GetMapping("/rabbit")
     public String rabbitTest() {
         return boydguyService.queryProductList();
+    }
+
+    @GetMapping("/redis8")
+    public String redisTest8() {
+        for (int i = 0; i < 50; i++) {
+            ThreadTest threadTest = new ThreadTest(boydguyService, 200);
+            new Thread(threadTest, "thread_app_" + i).start();
+        }
+        return "测试Redis分布式锁";
     }
 
 }
