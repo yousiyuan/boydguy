@@ -228,13 +228,10 @@ public class ComUtils {
     }
 
     /**
-     * 创建缓存key
+     * 返回对象的字符串格式
      */
-    public static String cacheKey(Object... args) {
-        List<String> params = Arrays.stream(args)
-                .map(JsonUtils::to)
-                .collect(Collectors.toList());
-        return DigestUtils.md5DigestAsHex(String.join("-", params).getBytes(StandardCharsets.UTF_8));
+    public static String str(Object value) {
+        return value instanceof String ? String.valueOf(value) : JsonUtils.to(value);
     }
 
 }

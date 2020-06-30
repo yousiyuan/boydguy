@@ -10,6 +10,6 @@ import org.springframework.context.annotation.Import;
 @EnableCaching(proxyTargetClass = true)
 @ComponentScan(basePackages = {"com.boydguy.backend", "com.boydguy.generate"})
 @MapperScan(basePackages = {"com.boydguy.backend.dao.mapper"})
-@Import(value = {JacksonConfig.class, RedisConfig.class, RepositoryConfig.class})
+@Import(value = {JacksonConfig.class, RedisConfig.class, RabbitConfig.class, RepositoryConfig.class})
 public class BoydguyApiConfiguration {
 }

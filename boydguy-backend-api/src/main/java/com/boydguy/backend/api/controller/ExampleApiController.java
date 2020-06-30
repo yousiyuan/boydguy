@@ -94,4 +94,9 @@ public class ExampleApiController {
         return "redis7测试完毕";
     }
 
+    @GetMapping("/rabbit")
+    public String rabbitTest() {
+        return boydguyService.queryProductList();
+    }
+
 }

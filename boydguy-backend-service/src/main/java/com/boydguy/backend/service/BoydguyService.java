@@ -3,6 +3,7 @@ package com.boydguy.backend.service;
 import com.boydguy.backend.pojo.Customer;
 import com.boydguy.backend.pojo.Product;
 import com.boydguy.backend.service.base.BaseService;
+import com.boydguy.generate.utils.ComUtils;
 import com.boydguy.generate.utils.EhcacheUtils;
 import com.boydguy.generate.utils.JsonUtils;
 import com.boydguy.generate.utils.RedisUtils;
@@ -272,6 +273,11 @@ public class BoydguyService extends BaseService {
         product1.setProductName("流年·公子");
         product1.setQuantityPerUnit("位");
         System.out.println(productBaseDao.updateByExampleSelective(product1, example2));//selectByExample tk.mybatis.mapper.entity.Example
+    }
+
+    public String queryProductList() {
+        Object result = rabbitService.produce("DRACD");
+        return ComUtils.str(result);
     }
 
 }

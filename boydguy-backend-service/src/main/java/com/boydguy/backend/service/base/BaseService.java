@@ -4,6 +4,7 @@ import com.boydguy.backend.dao.ProductDao;
 import com.boydguy.backend.dao.base.BaseDao;
 import com.boydguy.backend.pojo.Customer;
 import com.boydguy.backend.pojo.Product;
+import com.boydguy.backend.service.rabbit.RabbitService;
 import com.boydguy.backend.service.redis.RedisService;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -20,5 +21,8 @@ public abstract class BaseService {
 
     @Autowired
     protected RedisService redisService;
+
+    @Autowired
+    protected RabbitService rabbitService;
 
 }
