@@ -115,6 +115,12 @@
                     </exclusion>
                 </exclusions>
             </dependency>
+            <!--redis缓存-->
+            <dependency>
+                <groupId>org.springframework.data</groupId>
+                <artifactId>spring-data-redis</artifactId>
+                <version>2.1.10.RELEASE</version>
+            </dependency>
             <!--ehcache缓存-->
             <dependency>
                 <groupId>net.sf.ehcache</groupId>
